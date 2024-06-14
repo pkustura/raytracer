@@ -9,6 +9,7 @@ public:
 
     Color operator+(const Color& c) const;
     Color operator*(float scalar) const;
+    Color operator*(const Vector3& v) const;  // Intensity is vec3.
     Color& operator+=(const Color& c);
     Color& operator*=(float scalar);
 

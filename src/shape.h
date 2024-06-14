@@ -8,6 +8,7 @@ public:
     Material material;
 
     Shape(const Material& material) : material(material) {}
+    virtual ~Shape() = default;  // virtual destructor
 
     virtual bool intersect(const Ray& ray, float& t) const = 0;
     virtual Vector3 get_normal(const Vector3& point) const = 0;

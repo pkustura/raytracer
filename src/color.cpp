@@ -10,6 +10,11 @@ Color Color::operator*(float scalar) const {
     return Color(r * scalar, g * scalar, b * scalar);
 }
 
+// Vector multiplication (element-wise)
+Color Color::operator*(const Vector3& v) const {
+    return Color(r * v.x, g * v.y, b * v.z);
+}
+
 // In-place addition
 Color& Color::operator+=(const Color& c) {
     r += c.r;

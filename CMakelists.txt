@@ -7,6 +7,9 @@ set(CMAKE_CXX_STANDARD 14)
 find_package(OpenGL REQUIRED)
 find_package(glfw3 3.3 REQUIRED)
 
+# Add GLEW package
+find_package(GLEW REQUIRED)
+
 # Include directories
 include_directories(src)
 
@@ -18,6 +21,7 @@ add_executable(Raytracer
     src/ray.cpp
     src/vector.cpp
     src/color.cpp
+    src/material.cpp
     src/shape.cpp
 )
 
