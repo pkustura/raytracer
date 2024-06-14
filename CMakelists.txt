@@ -1,0 +1,28 @@
+cmake_minimum_required(VERSION 3.10)
+project(Raytracer)
+
+set(CMAKE_CXX_STANDARD 14)
+
+# Find packages
+find_package(OpenGL REQUIRED)
+find_package(glfw3 3.3 REQUIRED)
+
+# Include directories
+include_directories(src)
+
+# Add executable
+add_executable(Raytracer
+    src/main.cpp
+    src/camera.cpp
+    src/light.cpp
+    src/ray.cpp
+    src/vector.cpp
+    src/color.cpp
+    src/shape.cpp
+)
+
+# Define GL_SILENCE_DEPRECATION to silence OpenGL deprecation warnings on macOS
+target_compile_definitions(Raytracer PRIVATE GL_SILENCE_DEPRECATION)
+
+# Link libraries
+target_link_libraries(Raytracer OpenGL::GL glfw)
