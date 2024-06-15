@@ -69,7 +69,7 @@ Vector3 Vector3::cross(const Vector3& v) const {
 
 // Length (magnitude) of the vector
 float Vector3::length() const {
-    return std::sqrt(x * x, y * y, z * z);
+    return std::sqrt(x * x + y * y + z * z);
 }
 
 // Normalized (unit) vector
@@ -83,4 +83,8 @@ Vector3 Vector3::clone() const {
     return Vector3(x, y, z);
 }
 
-Vector
+Vector3 Vector3::addScaledVector(Vector3 v, float scalar) const {
+  Vector3 sv = v*scalar;
+  return Vector3(x + sv.x, y + sv.y, z + sv.z);
+}
+

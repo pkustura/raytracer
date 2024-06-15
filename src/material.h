@@ -7,6 +7,5 @@ public:
     Color specular;
     float shininess;
 
-    Material(const Color& diffuse, const Color& specular, float shininess)
-        : diffuse(diffuse), specular(specular), shininess(shininess) {}
+    Material(const Color& diffuse, const Color& specular, float shininess);
 };

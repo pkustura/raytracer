@@ -25,4 +25,5 @@ public:
     float length() const;
     Vector3 normalized() const;
     Vector3 clone() const;
+    Vector3 addScaledVector(Vector3 v, float scalar) const;
 };

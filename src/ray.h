@@ -11,4 +11,4 @@ public:
 
     Vector3 point_at_parameter(float t) const;
 };
-
+ 
