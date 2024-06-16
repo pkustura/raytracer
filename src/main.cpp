@@ -40,9 +40,45 @@ void processInput(GLFWwindow* window, Camera* camera) {
         camera->origin = camera->origin + Vector3(-cameraSpeed, 0, 0);
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
         camera->origin = camera->origin + Vector3(cameraSpeed, 0, 0);
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        glfwSetWindowShouldClose(window, true);
+
+    // Update the camera parameters based on new position, preserving the current lookat direction
+    Vector3 direction(
+        cos(camera->yaw * M_PI / 180.0) * cos(camera->pitch * M_PI / 180.0),
+        sin(camera->pitch * M_PI / 180.0),
+        sin(camera->yaw * M_PI / 180.0) * cos(camera->pitch * M_PI / 180.0)
+    );
 
     // Update the camera parameters based on new position
-    camera->update_camera(camera->origin, camera->origin + Vector3(0, 0, -1), Vector3(0, 1, 0), 20.0f, 4.0f / 3.0f, 0.1f);
+    camera->update_camera(camera->origin, camera->origin + direction, Vector3(0, 1, 0), 20.0f, 4.0f / 3.0f, 0.1f);
+}
+
+void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+    static const float sensitivity = 0.1f;  // Mouse sensitivity
+    static float lastX = 400, lastY = 300;  // Initial mouse position
+    static bool firstMouse = true;
+
+    if (firstMouse) {
+        lastX = xpos;
+        lastY = ypos;
+        firstMouse = false;
+    }
+
+    float xoffset = xpos - lastX;
+    float yoffset = lastY - ypos;  // Reversed since y-coordinates go from bottom to top
+
+    lastX = xpos;
+    lastY = ypos;
+
+    xoffset *= sensitivity;
+    yoffset *= sensitivity;
+
+    // Retrieve the camera from the user pointer
+    Camera* camera = static_cast<Camera*>(glfwGetWindowUserPointer(window));
+    if (camera) {
+        camera->update_orientation(xoffset, yoffset);
+    }
 }
 
 
@@ -114,6 +150,15 @@ int main() {
     float aspect_ratio = float(image_width) / float(image_height);
 
     Camera camera(lookfrom, lookat, vup, vfov, aspect_ratio, 0.1f);
+
+    // Set the user pointer to the camera
+    glfwSetWindowUserPointer(window, &camera);
+
+    // Set the mouse callback
+    glfwSetCursorPosCallback(window, mouse_callback);
+
+    // Capture the mouse cursor
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
     // Light setup
     Light light(Vector3(5, 5, 5), Vector3(1, 1, 1));
