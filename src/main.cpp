@@ -33,25 +33,18 @@ void processInput(GLFWwindow* window, Camera* camera) {
     static const float cameraSpeed = 0.5f; // Adjust accordingly
 
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        camera->origin = camera->origin + Vector3(0, 0, -cameraSpeed);
+        camera->updatePosition(camera->origin - camera->w * cameraSpeed); // move forward
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        camera->origin = camera->origin + Vector3(0, 0, cameraSpeed);
+        camera->updatePosition(camera->origin + camera->w * cameraSpeed); // move backward
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        camera->origin = camera->origin + Vector3(-cameraSpeed, 0, 0);
+        camera->updatePosition(camera->origin - camera->u * cameraSpeed); // move left
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        camera->origin = camera->origin + Vector3(cameraSpeed, 0, 0);
+        camera->updatePosition(camera->origin + camera->u * cameraSpeed); // move right
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    // Update the camera parameters based on new position, preserving the current lookat direction
-    Vector3 direction(
-        cos(camera->yaw * M_PI / 180.0) * cos(camera->pitch * M_PI / 180.0),
-        sin(camera->pitch * M_PI / 180.0),
-        sin(camera->yaw * M_PI / 180.0) * cos(camera->pitch * M_PI / 180.0)
-    );
-
-    // Update the camera parameters based on new position
-    camera->update_camera(camera->origin, camera->origin + direction, Vector3(0, 1, 0), 20.0f, 4.0f / 3.0f, 0.1f);
+    // update camera's vectors based on new position
+    camera->updateVectors();
 }
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
@@ -77,7 +70,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
     // Retrieve the camera from the user pointer
     Camera* camera = static_cast<Camera*>(glfwGetWindowUserPointer(window));
     if (camera) {
-        camera->update_orientation(xoffset, yoffset);
+        camera->updateOrientation(xoffset, yoffset);
     }
 }
 
