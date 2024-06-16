@@ -14,6 +14,7 @@
 
 using namespace std;
 
+
 // Utility function to write the image to a PPM file
 void write_image(const string& filename, const vector<Color>& image, int width, int height) {
     ofstream file(filename);
@@ -26,6 +27,26 @@ void write_image(const string& filename, const vector<Color>& image, int width, 
     }
     file.close();
 }
+
+Camera camera(Vector3(3, 3, 2), Vector3(0, 0, -1), Vector3(0, 1, 0), 20.0f, 4.0f / 3.0f, 0.1f);
+
+void processInput(GLFWwindow* window) {
+    static const float cameraSpeed = 0.05f; // Adjust accordingly
+
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        camera.origin = camera.origin + Vector3(0, 0, -cameraSpeed);
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        camera.origin = camera.origin + Vector3(0, 0, cameraSpeed);
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        camera.origin = camera.origin + Vector3(-cameraSpeed, 0, 0);
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        camera.origin = camera.origin + Vector3(cameraSpeed, 0, 0);
+
+    // Update the camera parameters based on new position
+    camera.update_camera(camera.origin, camera.origin + Vector3(0, 0, -1), Vector3(0, 1, 0), 20.0f, 4.0f / 3.0f, 0.1f);
+}
+
+
 
 // Function to calculate the color of a ray by checking for intersections with shapes
 Color ray_color(const Ray& ray, const vector<Shape*>& shapes, const Light& light) {
@@ -76,6 +97,12 @@ int main() {
     // Make the window's context current
     glfwMakeContextCurrent(window);
 
+    // Initialize GLEW
+    if (glewInit() != GLEW_OK) {
+        cerr << "Failed to initialize GLEW" << endl;
+        return -1;
+    }
+
     // Image dimensions
     const int image_width = 800;
     const int image_height = 600;
@@ -86,7 +113,7 @@ int main() {
     Vector3 vup(0, 1, 0);
     float vfov = 20.0;
     float aspect_ratio = float(image_width) / float(image_height);
-    Camera camera(lookfrom, lookat, vup, vfov, aspect_ratio);
+    //Camera camera(lookfrom, lookat, vup, vfov, aspect_ratio);
 
     // Light setup
     Light light(Vector3(5, 5, 5), Vector3(1, 1, 1));
@@ -103,36 +130,36 @@ int main() {
 
     // Render loop
     vector<Color> image(image_width * image_height);
-    for (int j = image_height - 1; j >= 0; --j) {
-        for (int i = 0; i < image_width; ++i) {
-            float u = float(i) / float(image_width);
-            float v = float(j) / float(image_height);
-            Ray ray = camera.get_ray(u, v);
-            Color pixel_color = ray_color(ray, shapes, light);
-            image[j * image_width + i] = pixel_color;
-        }
-    }
-
-    // Convert image to pixel data
-    vector<unsigned char> pixel_data(image_width * image_height * 3);
-    for (int i = 0; i < image.size(); ++i) {
-        pixel_data[i * 3 + 0] = static_cast<unsigned char>(255.99 * image[i].r);
-        pixel_data[i * 3 + 1] = static_cast<unsigned char>(255.99 * image[i].g);
-        pixel_data[i * 3 + 2] = static_cast<unsigned char>(255.99 * image[i].b);
-    }
-
-    // Generate a texture
     GLuint texture;
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
-
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image_width, image_height, 0, GL_RGB, GL_UNSIGNED_BYTE, pixel_data.data());
-
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image_width, image_height, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    // Main loop
     while (!glfwWindowShouldClose(window)) {
+        processInput(window);
+
+        for (int j = image_height - 1; j >= 0; --j) {
+            for (int i = 0; i < image_width; ++i) {
+                float u = float(i) / float(image_width);
+                float v = float(j) / float(image_height);
+                Ray ray = camera.get_ray(u, v);
+                Color pixel_color = ray_color(ray, shapes, light);
+                image[j * image_width + i] = pixel_color;
+            }
+        }
+
+        // Convert image to pixel data
+        vector<unsigned char> pixel_data(image_width * image_height * 3);
+        for (int i = 0; i < image.size(); ++i) {
+            pixel_data[i * 3 + 0] = static_cast<unsigned char>(255.99 * image[i].r);
+            pixel_data[i * 3 + 1] = static_cast<unsigned char>(255.99 * image[i].g);
+            pixel_data[i * 3 + 2] = static_cast<unsigned char>(255.99 * image[i].b);
+        }
+
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, image_width, image_height, GL_RGB, GL_UNSIGNED_BYTE, pixel_data.data());
+
         // Clear the screen
         glClear(GL_COLOR_BUFFER_BIT);
 
@@ -155,7 +182,6 @@ int main() {
         // Poll for and process events
         glfwPollEvents();
     }
-
     // Clean up
     glDeleteTextures(1, &texture);
     for (auto shape : shapes) {

@@ -26,4 +26,8 @@ public:
     Vector3 normalized() const;
     Vector3 clone() const;
     Vector3 addScaledVector(Vector3 v, float scalar) const;
+
+    
+    // Friend function to support float * Vector3
+    friend Vector3 operator*(float scalar, const Vector3& v);
 };
