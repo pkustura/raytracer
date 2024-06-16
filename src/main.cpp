@@ -28,22 +28,21 @@ void write_image(const string& filename, const vector<Color>& image, int width, 
     file.close();
 }
 
-Camera camera(Vector3(3, 3, 2), Vector3(0, 0, -1), Vector3(0, 1, 0), 20.0f, 4.0f / 3.0f, 0.1f);
 
-void processInput(GLFWwindow* window) {
-    static const float cameraSpeed = 0.05f; // Adjust accordingly
+void processInput(GLFWwindow* window, Camera* camera) {
+    static const float cameraSpeed = 0.5f; // Adjust accordingly
 
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        camera.origin = camera.origin + Vector3(0, 0, -cameraSpeed);
+        camera->origin = camera->origin + Vector3(0, 0, -cameraSpeed);
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        camera.origin = camera.origin + Vector3(0, 0, cameraSpeed);
+        camera->origin = camera->origin + Vector3(0, 0, cameraSpeed);
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        camera.origin = camera.origin + Vector3(-cameraSpeed, 0, 0);
+        camera->origin = camera->origin + Vector3(-cameraSpeed, 0, 0);
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        camera.origin = camera.origin + Vector3(cameraSpeed, 0, 0);
+        camera->origin = camera->origin + Vector3(cameraSpeed, 0, 0);
 
     // Update the camera parameters based on new position
-    camera.update_camera(camera.origin, camera.origin + Vector3(0, 0, -1), Vector3(0, 1, 0), 20.0f, 4.0f / 3.0f, 0.1f);
+    camera->update_camera(camera->origin, camera->origin + Vector3(0, 0, -1), Vector3(0, 1, 0), 20.0f, 4.0f / 3.0f, 0.1f);
 }
 
 
@@ -113,7 +112,8 @@ int main() {
     Vector3 vup(0, 1, 0);
     float vfov = 20.0;
     float aspect_ratio = float(image_width) / float(image_height);
-    //Camera camera(lookfrom, lookat, vup, vfov, aspect_ratio);
+
+    Camera camera(lookfrom, lookat, vup, vfov, aspect_ratio, 0.1f);
 
     // Light setup
     Light light(Vector3(5, 5, 5), Vector3(1, 1, 1));
@@ -125,7 +125,7 @@ int main() {
     Material blue(Color(0, 0, 1), Color(1, 1, 1), 32);
 
     shapes.push_back(new Sphere(Vector3(0, 0, -1), 0.5, red));
-    shapes.push_back(new Sphere(Vector3(0, -100.5, -1), 100, green));
+    shapes.push_back(new Sphere(Vector3(0, -100.5, -1), 10, green));
     shapes.push_back(new Plane(Vector3(0, -1, 0), Vector3(0, 1, 0), blue));
 
     // Render loop
@@ -138,7 +138,7 @@ int main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     while (!glfwWindowShouldClose(window)) {
-        processInput(window);
+        processInput(window, &camera);
 
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
