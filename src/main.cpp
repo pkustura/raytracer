@@ -28,6 +28,30 @@ void write_image(const string& filename, const vector<Color>& image, int width, 
     file.close();
 }
 
+Vector3 reflect(const Vector3& I, const Vector3& N) {
+    return I - 2.0f * N.dot(I) * N;
+}
+
+bool refract(const Vector3& I, const Vector3& N, float ior, Vector3& refracted) {
+    float cosi = clamp(I.dot(N), -1.0f, 1.0f);
+    float etai = 1, etat = ior;
+    Vector3 n = N;
+    if (cosi < 0) {
+        cosi = -cosi;
+    } else {
+        swap(etai, etat);
+        n = -1*N;
+    }
+    float eta = etai / etat;
+    float k = 1 - eta * eta * (1 - cosi * cosi);
+    if (k < 0) {
+        return false;
+    } else {
+        refracted = eta * I + (eta * cosi - sqrt(k)) * n;
+        return true;
+    }
+}
+
 
 void processInput(GLFWwindow* window, Camera* camera) {
     static const float cameraSpeed = 0.5f; // Adjust accordingly
@@ -43,8 +67,6 @@ void processInput(GLFWwindow* window, Camera* camera) {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    // update camera's vectors based on new position
-    camera->updateVectors();
 }
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
@@ -75,6 +97,28 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 }
 
 
+Color shade(const Material& material, const Vector3& normal, const Vector3& viewDir, const Vector3& lightDir, const Vector3& lightColor) {
+    // ambient
+    Color ambient = material.ambient * lightColor;
+
+    // diffuse
+    float diff = max(normal.dot(lightDir), 0.0f);
+    Color diffuse = material.diffuse * diff * lightColor;
+
+    // specular
+    Vector3 reflectDir = reflect(-1*lightDir, normal);
+    float spec = pow(max(viewDir.dot(reflectDir), 0.0f), material.shininess);
+    Color specular = material.specular * spec * lightColor;
+
+    // combine results
+    Color result = ambient + diffuse + specular;
+
+    // handle transparency
+    result = result * (1.0f - material.transparency) + material.ambient * material.transparency;
+
+    return result;
+}
+
 
 // Function to calculate the color of a ray by checking for intersections with shapes
 Color ray_color(const Ray& ray, const vector<Shape*>& shapes, const Light& light) {
@@ -92,13 +136,18 @@ Color ray_color(const Ray& ray, const vector<Shape*>& shapes, const Light& light
     }
 
     if (hit_shape) {
+        Material material = hit_shape->material;
+
         Vector3 hit_point = ray.point_at_parameter(t);
         Vector3 normal = hit_shape->get_normal(hit_point);
         Vector3 light_dir = (light.get_position() - hit_point).normalized();
+        Vector3 view_dir = -1 * ray.direction;
         float diff = max(normal.dot(light_dir), 0.0f);
 
-        Color diffuse = (hit_shape->material.diffuse * diff) * light.get_intensity();
-        return diffuse.clamped();
+        return shade(material, normal, view_dir, light_dir, light.intensity).clamped();
+
+        //Color diffuse = (hit_shape->material.diffuse * diff) * light.get_intensity();
+        //return diffuse.clamped();
     }
 
     // Background color
@@ -158,13 +207,21 @@ int main() {
 
     // Scene setup
     vector<Shape*> shapes;
-    Material red(Color(1, 0, 0), Color(1, 1, 1), 32);
-    Material green(Color(0, 1, 0), Color(1, 1, 1), 32);
-    Material blue(Color(0, 0, 1), Color(1, 1, 1), 32);
+    // create a diffuse material
+    DiffuseMaterial diffuseMat(Color(0.1f, 0.1f, 0.1f), Color(0.8f, 0.4f, 0.3f));
 
-    shapes.push_back(new Sphere(Vector3(0, 0, -1), 0.5, red));
-    shapes.push_back(new Sphere(Vector3(0, -100.5, -1), 10, green));
-    shapes.push_back(new Plane(Vector3(0, -1, 0), Vector3(0, 1, 0), blue));
+    // create a phong material
+    PhongMaterial phongMat(Color(0.1f, 0.1f, 0.1f), Color(0.1f, 0.5f, 0.3f), Color(1.0f, 1.0f, 1.0f), 10.0f);
+
+    // create a mirror material
+    MirrorMaterial mirrorMat(Color(0.1f, 0.1f, 0.1f), Color(0.9f, 0.9f, 0.9f));
+
+    // create a glass material
+    GlassMaterial glassMat(Color(0.1f, 0.1f, 0.1f), Color(0.1f, 0.1f, 0.1f), 0.9f, 1.5f);
+
+    shapes.push_back(new Sphere(Vector3(0, 0, -1), 0.5, phongMat));
+    //shapes.push_back(new Sphere(Vector3(0, -100.5, -1), 10, green));
+    shapes.push_back(new Plane(Vector3(0, -1, 0), Vector3(0, 1, 0), diffuseMat));
 
     // Render loop
     vector<Color> image(image_width * image_height);
@@ -177,6 +234,7 @@ int main() {
 
     while (!glfwWindowShouldClose(window)) {
         processInput(window, &camera);
+        
 
         for (int j = image_height - 1; j >= 0; --j) {
             for (int i = 0; i < image_width; ++i) {
