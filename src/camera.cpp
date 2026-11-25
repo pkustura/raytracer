@@ -3,8 +3,10 @@
 #include <cmath>
 
 Camera::Camera(Vector3 lookfrom, Vector3 lookat, Vector3 vup, float vfov, float aspect, float aperture) {
-    yaw = 0.0f;
-    pitch = 0.0f;
+    // Derive yaw/pitch (degrees) so the camera initially faces lookat
+    Vector3 dir = (lookat - lookfrom).normalized();
+    yaw = atan2(dir.z, dir.x) * 180.0 / M_PI;
+    pitch = asin(dir.y) * 180.0 / M_PI;
     vertical_fov = vfov;
     aspect_ratio = aspect;
     update_camera(lookfrom, lookat, vup, vfov, aspect, aperture);

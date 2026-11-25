@@ -16,7 +16,7 @@ public:
     Vector3 get_normal(const Vector3& point) const override;
 };
 
-// Triangle mesh with a bounding volume hierarchy, so models with hundreds of
+// Triangle mesh with a bounding volume hierarchy (built with the surface area heuristic), so models with hundreds of
 // thousands of triangles (dragon, buddha) can be traced.
 class Mesh : public Shape {
 public:
@@ -38,7 +38,8 @@ public:
     bool intersect(const Ray& ray, float& t, Vector3& normal) const override;
 
     // Returns the normal of the most recent hit from intersect(ray, t).
-    // Prefer the three-argument intersect, which returns the normal directly.
+    // Prefer the three-argument intersect, which returns the normal directly
+    // and is safe to call from multiple threads.
     Vector3 get_normal(const Vector3& point) const override;
 
     bool empty() const { return tris.empty(); }
@@ -66,5 +67,5 @@ private:
     std::vector<Node> nodes;
     mutable Vector3 last_normal;
 
-    int build(int start, int end, std::vector<Vector3>& centroids);
+    int build(int start, int end, std::vector<Vector3>& centroids, int depth);
 };

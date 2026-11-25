@@ -3,6 +3,11 @@ project(Raytracer)
 
 set(CMAKE_CXX_STANDARD 17)
 
+# Default to an optimized build; the renderer runs on the CPU every frame.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 # Find packages
 find_package(OpenGL REQUIRED)
 find_package(glfw3 3.3 REQUIRED)
@@ -16,10 +21,8 @@ set(GLEW_LIBRARIES "/opt/homebrew/opt/glew/lib/libGLEW.dylib")
 # Include directories
 include_directories(src ${GLEW_INCLUDE_DIRS})
 
-
-# Add executable
-add_executable(Raytracer
-    src/main.cpp
+# Rendering core shared by the interactive app and the benchmark
+add_library(RaytracerCore STATIC
     src/camera.cpp
     src/light.cpp
     src/ray.cpp
@@ -29,10 +32,22 @@ add_executable(Raytracer
     src/shape.cpp
     src/obj_loader.cpp
     src/mesh.cpp
+    src/renderer.cpp
+    src/scene.cpp
 )
+
+# Absolute path to the models, so the programs can be run from any directory
+target_compile_definitions(RaytracerCore PRIVATE RAYTRACER_ASSET_DIR="${CMAKE_SOURCE_DIR}/objs")
+
+# Interactive app
+add_executable(Raytracer src/main.cpp)
 
 # Define GL_SILENCE_DEPRECATION to silence OpenGL deprecation warnings on macOS
 target_compile_definitions(Raytracer PRIVATE GL_SILENCE_DEPRECATION)
 
 # Link libraries
-target_link_libraries(Raytracer OpenGL::GL glfw ${GLEW_LIBRARIES})
+target_link_libraries(Raytracer RaytracerCore OpenGL::GL glfw ${GLEW_LIBRARIES})
+
+# Headless benchmark
+add_executable(Benchmark bench/benchmark.cpp)
+target_link_libraries(Benchmark RaytracerCore)

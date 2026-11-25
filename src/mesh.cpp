@@ -8,7 +8,7 @@
 namespace {
 
 const float TRI_EPSILON = 1e-8f;
-const int LEAF_SIZE = 4;
+const int LEAF_SIZE = 4;  // used only to size the node reservation
 
 // Möller–Trumbore ray/triangle test. v0 is a vertex, e1/e2 the edges from it.
 bool intersect_triangle(const Ray& ray, const Vector3& v0, const Vector3& e1, const Vector3& e2, float& t) {
@@ -96,7 +96,7 @@ Mesh::Mesh(const std::vector<Vector3>& vertices,
 
     if (!tris.empty()) {
         nodes.reserve(2 * tris.size() / LEAF_SIZE + 1);
-        build(0, static_cast<int>(tris.size()), centroids);
+        build(0, static_cast<int>(tris.size()), centroids, 0);
     }
 }
 
@@ -107,9 +107,43 @@ Mesh Mesh::from_obj(const std::string& filename, const Material& material, const
     return Mesh(vertices, faces, material, position, scale);
 }
 
-// Recursively builds the BVH over tris[start, end) by splitting at the median
-// centroid along the longest axis. Returns the new node's index.
-int Mesh::build(int start, int end, std::vector<Vector3>& centroids) {
+namespace {
+
+const int SAH_BINS = 12;
+const int MAX_LEAF_SIZE = 8;     // nodes above this size are always split
+const int MEDIAN_SPLIT_DEPTH = 48;  // past this depth, use median splits to bound tree depth
+
+struct Bin {
+    Vector3 bmin{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
+    Vector3 bmax{-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()};
+    int count = 0;
+
+    void grow(const Vector3& lo, const Vector3& hi) {
+        bmin = vmin(bmin, lo);
+        bmax = vmax(bmax, hi);
+    }
+    void grow(const Bin& other) {
+        bmin = vmin(bmin, other.bmin);
+        bmax = vmax(bmax, other.bmax);
+        count += other.count;
+    }
+    float area() const {
+        if (count == 0) return 0.0f;
+        Vector3 d = bmax - bmin;
+        return 2.0f * (d.x * d.y + d.y * d.z + d.z * d.x);
+    }
+};
+
+int bin_index(float c, float lo, float extent) {
+    int b = static_cast<int>((c - lo) / extent * SAH_BINS);
+    return b < 0 ? 0 : (b >= SAH_BINS ? SAH_BINS - 1 : b);
+}
+
+}  // namespace
+
+// Recursively builds the BVH over tris[start, end) using the surface area
+// heuristic (binned). Returns the new node's index.
+int Mesh::build(int start, int end, std::vector<Vector3>& centroids, int depth) {
     int index = static_cast<int>(nodes.size());
     nodes.emplace_back();
 
@@ -127,35 +161,106 @@ int Mesh::build(int start, int end, std::vector<Vector3>& centroids) {
     nodes[index].box = {bmin, bmax};
 
     int count = end - start;
-    Vector3 extent = cmax - cmin;
-    int split_axis = 0;
-    if (extent.y > extent.x) split_axis = 1;
-    if (extent.z > axis(extent, split_axis)) split_axis = 2;
-
-    if (count <= LEAF_SIZE || axis(extent, split_axis) <= 0.0f) {
+    auto make_leaf = [&]() {
         nodes[index].start = start;
         nodes[index].count = count;
         return index;
+    };
+    if (count <= 2) return make_leaf();
+
+    Vector3 extent = cmax - cmin;
+    int mid = -1;
+
+    if (depth < MEDIAN_SPLIT_DEPTH) {
+        // Evaluate SAH cost for every bin boundary on every axis
+        float best_cost = std::numeric_limits<float>::max();
+        int best_axis = -1, best_split = 0;
+
+        for (int a = 0; a < 3; ++a) {
+            float lo = axis(cmin, a), ext = axis(extent, a);
+            if (ext <= 0.0f) continue;
+
+            Bin bins[SAH_BINS];
+            for (int i = start; i < end; ++i) {
+                const Tri& tri = tris[i];
+                Vector3 b = tri.v0 + tri.e1, c = tri.v0 + tri.e2;
+                Bin& bin = bins[bin_index(axis(centroids[i], a), lo, ext)];
+                bin.grow(vmin(tri.v0, vmin(b, c)), vmax(tri.v0, vmax(b, c)));
+                bin.count++;
+            }
+
+            // Sweep from the right to get areas/counts of every right-hand side
+            float right_area[SAH_BINS];
+            int right_count[SAH_BINS];
+            Bin acc;
+            for (int k = SAH_BINS - 1; k > 0; --k) {
+                acc.grow(bins[k]);
+                right_area[k] = acc.area();
+                right_count[k] = acc.count;
+            }
+
+            // Sweep from the left; split k puts bins [0, k) left and [k, N) right
+            acc = Bin();
+            for (int k = 1; k < SAH_BINS; ++k) {
+                acc.grow(bins[k - 1]);
+                if (acc.count == 0 || right_count[k] == 0) continue;
+                float cost = acc.area() * acc.count + right_area[k] * right_count[k];
+                if (cost < best_cost) {
+                    best_cost = cost;
+                    best_axis = a;
+                    best_split = k;
+                }
+            }
+        }
+
+        if (best_axis < 0) return make_leaf();  // all centroids coincide
+
+        // Compare against the cost of intersecting every triangle in a leaf
+        Vector3 d = bmax - bmin;
+        float parent_area = 2.0f * (d.x * d.y + d.y * d.z + d.z * d.x);
+        float split_cost = 1.0f + best_cost / parent_area;
+        if (split_cost >= count && count <= MAX_LEAF_SIZE) return make_leaf();
+
+        // Partition triangles (and their centroids) by bin
+        float lo = axis(cmin, best_axis), ext = axis(extent, best_axis);
+        int i = start, j = end - 1;
+        while (i <= j) {
+            if (bin_index(axis(centroids[i], best_axis), lo, ext) < best_split) {
+                ++i;
+            } else {
+                std::swap(tris[i], tris[j]);
+                std::swap(centroids[i], centroids[j]);
+                --j;
+            }
+        }
+        mid = i;
     }
 
-    // Partition around the median centroid, keeping tris and centroids in sync
-    int mid = start + count / 2;
-    std::vector<int> order(count);
-    std::iota(order.begin(), order.end(), start);
-    std::nth_element(order.begin(), order.begin() + (mid - start), order.end(), [&](int a, int b) {
-        return axis(centroids[a], split_axis) < axis(centroids[b], split_axis);
-    });
-    std::vector<Tri> tmp_tris(count);
-    std::vector<Vector3> tmp_centroids(count);
-    for (int i = 0; i < count; ++i) {
-        tmp_tris[i] = tris[order[i]];
-        tmp_centroids[i] = centroids[order[i]];
-    }
-    std::copy(tmp_tris.begin(), tmp_tris.end(), tris.begin() + start);
-    std::copy(tmp_centroids.begin(), tmp_centroids.end(), centroids.begin() + start);
+    if (mid <= start || mid >= end) {
+        // Too deep (or partition failed): median split along the widest centroid axis
+        int split_axis = 0;
+        if (extent.y > extent.x) split_axis = 1;
+        if (extent.z > axis(extent, split_axis)) split_axis = 2;
+        if (axis(extent, split_axis) <= 0.0f) return make_leaf();
 
-    int left = build(start, mid, centroids);
-    int right = build(mid, end, centroids);
+        mid = start + count / 2;
+        std::vector<int> order(count);
+        std::iota(order.begin(), order.end(), start);
+        std::nth_element(order.begin(), order.begin() + (mid - start), order.end(), [&](int x, int y) {
+            return axis(centroids[x], split_axis) < axis(centroids[y], split_axis);
+        });
+        std::vector<Tri> tmp_tris(count);
+        std::vector<Vector3> tmp_centroids(count);
+        for (int k = 0; k < count; ++k) {
+            tmp_tris[k] = tris[order[k]];
+            tmp_centroids[k] = centroids[order[k]];
+        }
+        std::copy(tmp_tris.begin(), tmp_tris.end(), tris.begin() + start);
+        std::copy(tmp_centroids.begin(), tmp_centroids.end(), centroids.begin() + start);
+    }
+
+    int left = build(start, mid, centroids, depth + 1);
+    int right = build(mid, end, centroids, depth + 1);
     nodes[index].left = left;
     nodes[index].right = right;
     return index;
@@ -168,7 +273,7 @@ bool Mesh::intersect(const Ray& ray, float& t, Vector3& normal) const {
     float closest = std::numeric_limits<float>::max();
     int hit = -1;
 
-    int stack[64];
+    int stack[128];  // build() bounds tree depth to well under this
     int sp = 0;
     stack[sp++] = 0;
     while (sp > 0) {
@@ -192,13 +297,12 @@ bool Mesh::intersect(const Ray& ray, float& t, Vector3& normal) const {
     if (hit < 0) return false;
     t = closest;
     normal = tris[hit].normal;
-    last_normal = normal;
     return true;
 }
 
 bool Mesh::intersect(const Ray& ray, float& t) const {
-    Vector3 normal;
-    return intersect(ray, t, normal);
+    // Not thread-safe (writes last_normal); the renderer uses the overload above.
+    return intersect(ray, t, last_normal);
 }
 
 Vector3 Mesh::get_normal(const Vector3& point) const {
