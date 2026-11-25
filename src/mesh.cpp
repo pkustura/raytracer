@@ -8,7 +8,7 @@
 namespace {
 
 const float TRI_EPSILON = 1e-8f;
-const int LEAF_SIZE = 4;  // used only to size the node reservation
+const int LEAF_SIZE = 4;  // leaf size for the median builder; also sizes the node reservation
 
 // Möller–Trumbore ray/triangle test. v0 is a vertex, e1/e2 the edges from it.
 bool intersect_triangle(const Ray& ray, const Vector3& v0, const Vector3& e1, const Vector3& e2, float& t) {
@@ -77,8 +77,9 @@ Mesh::Mesh(const std::vector<Vector3>& vertices,
            const std::vector<std::array<int, 3>>& faces,
            const Material& material,
            const Vector3& position,
-           float scale)
-    : Shape(material) {
+           float scale,
+           BvhBuilder builder)
+    : Shape(material), builder(builder) {
     tris.reserve(faces.size());
     std::vector<Vector3> centroids;
     centroids.reserve(faces.size());
@@ -100,11 +101,12 @@ Mesh::Mesh(const std::vector<Vector3>& vertices,
     }
 }
 
-Mesh Mesh::from_obj(const std::string& filename, const Material& material, const Vector3& position, float scale) {
+Mesh Mesh::from_obj(const std::string& filename, const Material& material, const Vector3& position, float scale,
+                    BvhBuilder builder) {
     std::vector<Vector3> vertices;
     std::vector<std::array<int, 3>> faces;
     load_obj(filename, vertices, faces, true);  // on failure both are empty -> empty mesh
-    return Mesh(vertices, faces, material, position, scale);
+    return Mesh(vertices, faces, material, position, scale, builder);
 }
 
 namespace {
@@ -141,8 +143,9 @@ int bin_index(float c, float lo, float extent) {
 
 }  // namespace
 
-// Recursively builds the BVH over tris[start, end) using the surface area
-// heuristic (binned). Returns the new node's index.
+// Recursively builds the BVH over tris[start, end) using the binned surface
+// area heuristic, or median splits for BvhBuilder::Median. Returns the new
+// node's index.
 int Mesh::build(int start, int end, std::vector<Vector3>& centroids, int depth) {
     int index = static_cast<int>(nodes.size());
     nodes.emplace_back();
@@ -167,11 +170,12 @@ int Mesh::build(int start, int end, std::vector<Vector3>& centroids, int depth) 
         return index;
     };
     if (count <= 2) return make_leaf();
+    if (builder == BvhBuilder::Median && count <= LEAF_SIZE) return make_leaf();
 
     Vector3 extent = cmax - cmin;
     int mid = -1;
 
-    if (depth < MEDIAN_SPLIT_DEPTH) {
+    if (builder == BvhBuilder::SAH && depth < MEDIAN_SPLIT_DEPTH) {
         // Evaluate SAH cost for every bin boundary on every axis
         float best_cost = std::numeric_limits<float>::max();
         int best_axis = -1, best_split = 0;
@@ -237,7 +241,8 @@ int Mesh::build(int start, int end, std::vector<Vector3>& centroids, int depth) 
     }
 
     if (mid <= start || mid >= end) {
-        // Too deep (or partition failed): median split along the widest centroid axis
+        // Median builder, or SAH that got too deep / failed to partition:
+        // split at the median centroid along the widest axis
         int split_axis = 0;
         if (extent.y > extent.x) split_axis = 1;
         if (extent.z > axis(extent, split_axis)) split_axis = 2;

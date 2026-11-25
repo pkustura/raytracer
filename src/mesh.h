@@ -16,7 +16,13 @@ public:
     Vector3 get_normal(const Vector3& point) const override;
 };
 
-// Triangle mesh with a bounding volume hierarchy (built with the surface area heuristic), so models with hundreds of
+// How a Mesh builds its BVH.
+enum class BvhBuilder {
+    Median,  // split at the median centroid of the widest axis (leaves of <= 4 triangles)
+    SAH,     // binned surface area heuristic (default)
+};
+
+// Triangle mesh with a bounding volume hierarchy, so models with hundreds of
 // thousands of triangles (dragon, buddha) can be traced.
 class Mesh : public Shape {
 public:
@@ -25,14 +31,16 @@ public:
          const std::vector<std::array<int, 3>>& faces,
          const Material& material,
          const Vector3& position = Vector3(0, 0, 0),
-         float scale = 1.0f);
+         float scale = 1.0f,
+         BvhBuilder builder = BvhBuilder::SAH);
 
     // Loads an OBJ file (normalized to fit [-1, 1]) and builds the mesh.
     // Check empty() afterwards to see whether loading worked.
     static Mesh from_obj(const std::string& filename,
                          const Material& material,
                          const Vector3& position = Vector3(0, 0, 0),
-                         float scale = 1.0f);
+                         float scale = 1.0f,
+                         BvhBuilder builder = BvhBuilder::SAH);
 
     bool intersect(const Ray& ray, float& t) const override;
     bool intersect(const Ray& ray, float& t, Vector3& normal) const override;
@@ -66,6 +74,7 @@ private:
     std::vector<Tri> tris;
     std::vector<Node> nodes;
     mutable Vector3 last_normal;
+    BvhBuilder builder;
 
     int build(int start, int end, std::vector<Vector3>& centroids, int depth);
 };

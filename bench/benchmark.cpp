@@ -1,7 +1,7 @@
 // Headless benchmark: renders the default scene with the camera orbiting the
 // models and reports frame rate and ray throughput.
 //
-// Usage: Benchmark [--frames N] [--width W] [--height H] [--threads T] [--out frame.ppm]
+// Usage: Benchmark [--frames N] [--width W] [--height H] [--threads T] [--bvh sah|median] [--out frame.ppm]
 //        --threads 0 (the default) uses one thread per hardware thread.
 
 #include <chrono>
@@ -37,6 +37,7 @@ int main(int argc, char** argv) {
     int width = 800;
     int height = 600;
     int threads = 0;
+    BvhBuilder bvh = BvhBuilder::SAH;
     string out;
 
     for (int i = 1; i < argc; ++i) {
@@ -49,13 +50,19 @@ int main(int argc, char** argv) {
         else if (arg == "--width") width = atoi(next());
         else if (arg == "--height") height = atoi(next());
         else if (arg == "--threads") threads = atoi(next());
+        else if (arg == "--bvh") {
+            string v = next();
+            if (v == "sah") bvh = BvhBuilder::SAH;
+            else if (v == "median") bvh = BvhBuilder::Median;
+            else { cerr << "--bvh must be 'sah' or 'median'" << endl; return 1; }
+        }
         else if (arg == "--out") out = next();
-        else { cerr << "usage: " << argv[0] << " [--frames N] [--width W] [--height H] [--threads T] [--out frame.ppm]" << endl; return 1; }
+        else { cerr << "usage: " << argv[0] << " [--frames N] [--width W] [--height H] [--threads T] [--bvh sah|median] [--out frame.ppm]" << endl; return 1; }
     }
 
     auto t_load = Clock::now();
     Scene scene;
-    if (!build_default_scene(scene)) return 1;
+    if (!build_default_scene(scene, bvh)) return 1;
     double load_s = chrono::duration<double>(Clock::now() - t_load).count();
 
     // Orbit the camera once around the scene's look-at point over the run
@@ -89,8 +96,9 @@ int main(int argc, char** argv) {
 
     uint64_t primary = uint64_t(width) * height * frames;
     printf("Scene load + BVH build: %.3f s\n", load_s);
-    printf("Frames: %d at %dx%d, %d threads\n", frames, width, height,
-           threads > 0 ? threads : int(std::thread::hardware_concurrency()));
+    printf("Frames: %d at %dx%d, %d threads, %s BVH\n", frames, width, height,
+           threads > 0 ? threads : int(std::thread::hardware_concurrency()),
+           bvh == BvhBuilder::SAH ? "SAH" : "median-split");
     printf("Average: %.2f fps (%.1f ms/frame, min %.1f, max %.1f)\n",
            frames / total_s, 1000.0 * total_s / frames, 1000.0 * min_frame, 1000.0 * max_frame);
     printf("Primary rays: %.2f Mrays/s\n", primary / total_s / 1e6);

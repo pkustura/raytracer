@@ -3,6 +3,7 @@
 #include <vector>
 #include "camera.h"
 #include "light.h"
+#include "mesh.h"
 #include "shape.h"
 
 // Resolves a model file name (e.g. "dragon.obj") to a path inside the repo's
@@ -26,5 +27,5 @@ struct Scene {
 };
 
 // Dragon, Buddha and a mirrored teapot on a floor, with a glass sphere in front.
-// Returns false if a model failed to load.
-bool build_default_scene(Scene& scene);
+// Returns false if a model failed to load (run fetch_models.sh to download them).
+bool build_default_scene(Scene& scene, BvhBuilder builder = BvhBuilder::SAH);
