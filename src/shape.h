@@ -12,6 +12,14 @@ public:
 
     virtual bool intersect(const Ray& ray, float& t) const = 0;
     virtual Vector3 get_normal(const Vector3& point) const = 0;
+
+    // Intersect and return the surface normal at the hit in one call. Shapes
+    // whose normal depends on which part was hit (e.g. meshes) override this.
+    virtual bool intersect(const Ray& ray, float& t, Vector3& normal) const {
+        if (!intersect(ray, t)) return false;
+        normal = get_normal(ray.point_at_parameter(t));
+        return true;
+    }
 };
 
 class Plane : public Shape {

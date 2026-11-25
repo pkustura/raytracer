@@ -27,6 +27,8 @@ add_executable(Raytracer
     src/color.cpp
     src/material.cpp
     src/shape.cpp
+    src/obj_loader.cpp
+    src/mesh.cpp
 )
 
 # Define GL_SILENCE_DEPRECATION to silence OpenGL deprecation warnings on macOS

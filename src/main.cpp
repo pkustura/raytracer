@@ -11,6 +11,7 @@
 #include "color.h"
 #include "material.h"
 #include "shape.h"
+#include "mesh.h"
 
 using namespace std;
 
@@ -130,11 +131,14 @@ Color ray_color(const Ray& ray, const vector<Shape*>& shapes, const Light& light
     float t_min = RAY_EPSILON;
     float t = numeric_limits<float>::max();
     Shape* hit_shape = nullptr;
+    Vector3 normal;
 
     for (const auto& shape : shapes) {
         float t_temp;
-        if (shape->intersect(ray, t_temp) && t_temp > t_min && t_temp < t) {
+        Vector3 n_temp;
+        if (shape->intersect(ray, t_temp, n_temp) && t_temp > t_min && t_temp < t) {
             t = t_temp;
+            normal = n_temp;
             hit_shape = shape;
         }
     }
@@ -149,7 +153,6 @@ Color ray_color(const Ray& ray, const vector<Shape*>& shapes, const Light& light
     const Material& material = hit_shape->material;
 
     Vector3 hit_point = ray.point_at_parameter(t);
-    Vector3 normal = hit_shape->get_normal(hit_point);
     Vector3 dir = ray.direction.normalized();
 
     // Normal facing against the incoming ray (flips when we're inside an object)
