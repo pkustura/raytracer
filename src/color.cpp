@@ -15,6 +15,11 @@ Color Color::operator*(const Vector3& v) const {
     return Color(r * v.x, g * v.y, b * v.z);
 }
 
+// Color multiplication (element-wise)
+Color Color::operator*(const Color& c) const {
+    return Color(r * c.r, g * c.g, b * c.b);
+}
+
 // In-place addition
 Color& Color::operator+=(const Color& c) {
     r += c.r;

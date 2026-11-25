@@ -110,50 +110,101 @@ Color shade(const Material& material, const Vector3& normal, const Vector3& view
     float spec = pow(max(viewDir.dot(reflectDir), 0.0f), material.shininess);
     Color specular = material.specular * spec * lightColor;
 
-    // combine results
-    Color result = ambient + diffuse + specular;
-
-    // handle transparency
-    result = result * (1.0f - material.transparency) + material.ambient * material.transparency;
-
-    return result;
+    // combine results (reflection/transparency are handled in ray_color)
+    return ambient + diffuse + specular;
 }
 
 
+// Schlick's approximation of the Fresnel reflectance
+float fresnel_schlick(float cosi, float etai, float etat) {
+    float r0 = (etai - etat) / (etai + etat);
+    r0 = r0 * r0;
+    return r0 + (1.0f - r0) * pow(1.0f - cosi, 5.0f);
+}
+
+const int MAX_DEPTH = 5;
+const float RAY_EPSILON = 1e-3f;
+
 // Function to calculate the color of a ray by checking for intersections with shapes
-Color ray_color(const Ray& ray, const vector<Shape*>& shapes, const Light& light) {
-    float t_min = 0.001;
-    float t_max = numeric_limits<float>::max();
-    float t = t_max;
+Color ray_color(const Ray& ray, const vector<Shape*>& shapes, const Light& light, int depth = 0) {
+    float t_min = RAY_EPSILON;
+    float t = numeric_limits<float>::max();
     Shape* hit_shape = nullptr;
 
     for (const auto& shape : shapes) {
         float t_temp;
-        if (shape->intersect(ray, t_temp) && t_temp < t) {
+        if (shape->intersect(ray, t_temp) && t_temp > t_min && t_temp < t) {
             t = t_temp;
             hit_shape = shape;
         }
     }
 
-    if (hit_shape) {
-        Material material = hit_shape->material;
-
-        Vector3 hit_point = ray.point_at_parameter(t);
-        Vector3 normal = hit_shape->get_normal(hit_point);
-        Vector3 light_dir = (light.get_position() - hit_point).normalized();
-        Vector3 view_dir = -1 * ray.direction;
-        float diff = max(normal.dot(light_dir), 0.0f);
-
-        return shade(material, normal, view_dir, light_dir, light.intensity).clamped();
-
-        //Color diffuse = (hit_shape->material.diffuse * diff) * light.get_intensity();
-        //return diffuse.clamped();
+    if (!hit_shape) {
+        // Background color
+        Vector3 unit_direction = ray.direction.normalized();
+        float t_background = 0.5 * (unit_direction.y + 1.0);
+        return (Color(1.0, 1.0, 1.0) * (1.0 - t_background) + Color(0.5, 0.7, 1.0) * t_background).clamped();
     }
 
-    // Background color
-    Vector3 unit_direction = ray.direction.normalized();
-    float t_background = 0.5 * (unit_direction.y + 1.0);
-    return (Color(1.0, 1.0, 1.0) * (1.0 - t_background) + Color(0.5, 0.7, 1.0) * t_background).clamped();
+    const Material& material = hit_shape->material;
+
+    Vector3 hit_point = ray.point_at_parameter(t);
+    Vector3 normal = hit_shape->get_normal(hit_point);
+    Vector3 dir = ray.direction.normalized();
+
+    // Normal facing against the incoming ray (flips when we're inside an object)
+    bool front_face = dir.dot(normal) < 0;
+    Vector3 facing_normal = front_face ? normal : -1 * normal;
+
+    Vector3 light_dir = (light.get_position() - hit_point).normalized();
+    Vector3 view_dir = -1 * dir;
+
+    // Local (direct) lighting
+    Color local = shade(material, facing_normal, view_dir, light_dir, light.intensity);
+
+    if (depth >= MAX_DEPTH) {
+        return local.clamped();
+    }
+
+    Vector3 reflect_dir = reflect(dir, facing_normal).normalized();
+    Ray reflect_ray(hit_point + facing_normal * RAY_EPSILON, reflect_dir);
+
+    // Glass: blend reflection and refraction using Fresnel
+    if (material.transparency > 0.0f) {
+        float etai = front_face ? 1.0f : material.ior;
+        float etat = front_face ? material.ior : 1.0f;
+        float cosi = min(view_dir.dot(facing_normal), 1.0f);
+
+        Vector3 refract_dir;
+        float kr;
+        Color refracted;
+        if (refract(dir, normal, material.ior, refract_dir)) {
+            // Schlick must use the cosine on the less dense side
+            float cos_fresnel = cosi;
+            if (etai > etat) {
+                cos_fresnel = min(-refract_dir.normalized().dot(facing_normal), 1.0f);
+            }
+            kr = fresnel_schlick(cos_fresnel, etai, etat);
+            Ray refract_ray(hit_point - facing_normal * RAY_EPSILON, refract_dir.normalized());
+            refracted = ray_color(refract_ray, shapes, light, depth + 1);
+        } else {
+            kr = 1.0f; // total internal reflection
+        }
+
+        Color reflected = ray_color(reflect_ray, shapes, light, depth + 1);
+        Color transmitted = reflected * kr + refracted * (1.0f - kr);
+
+        return (local * (1.0f - material.transparency) + transmitted * material.transparency).clamped();
+    }
+
+    // Mirror: add tinted reflection on top of local lighting
+    const Color& mr = material.mirror_reflectance;
+    if (mr.r > 0.0f || mr.g > 0.0f || mr.b > 0.0f) {
+        Color reflected = ray_color(reflect_ray, shapes, light, depth + 1);
+        return (local + reflected * mr).clamped();
+    }
+
+    return local.clamped();
 }
 
 int main() {
@@ -186,7 +237,7 @@ int main() {
 
     // Camera setup
     Vector3 lookfrom(3, 3, 2);
-    Vector3 lookat(0, 0, -1);
+    Vector3 lookat(0, 0, 1);
     Vector3 vup(0, 1, 0);
     float vfov = 20.0;
     float aspect_ratio = float(image_width) / float(image_height);
@@ -219,7 +270,7 @@ int main() {
     // create a glass material
     GlassMaterial glassMat(Color(0.1f, 0.1f, 0.1f), Color(0.1f, 0.1f, 0.1f), 0.9f, 1.5f);
 
-    shapes.push_back(new Sphere(Vector3(0, 0, -1), 0.5, phongMat));
+    shapes.push_back(new Sphere(Vector3(0, 0, -1), 0.5, glassMat));
     //shapes.push_back(new Sphere(Vector3(0, -100.5, -1), 10, green));
     shapes.push_back(new Plane(Vector3(0, -1, 0), Vector3(0, 1, 0), diffuseMat));
 
