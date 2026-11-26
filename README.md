@@ -7,11 +7,12 @@ A small real-time, multithreaded CPU raytracer in C++ that draws to a GLFW windo
 Requires CMake, GLFW and GLEW (e.g. `brew install cmake glfw glew`), plus `curl`, `tar` and `awk` to download the models.
 
 ```sh
-./fetch_models.sh        # downloads the models into objs/ (once)
 cmake -S . -B build
-cmake --build build
+cmake --build build      # also downloads any missing models into objs/
 ./build/Raytracer
 ```
+
+The build runs `fetch_models.sh`, which downloads only the models that are missing; once they're all present it just prints one line. To build offline, configure with `-DRAYTRACER_FETCH_MODELS=OFF` and run `./fetch_models.sh` yourself when you're back online.
 
 The build defaults to Release, since the renderer runs on the CPU every frame. Model paths are compiled in as absolute paths to this repo's `objs/` directory, so `Raytracer` and `Benchmark` can be run from any directory. If you move the repo, re-run CMake.
 
@@ -46,7 +47,7 @@ scene.shapes.push_back(new Mesh(Mesh::from_obj(asset_path("dragon.obj"), phongMa
 
 ### Models (`objs/`)
 
-The models aren't stored in git. `./fetch_models.sh` downloads them from their sources; use `--force` to download them again.
+The models aren't stored in git. The build downloads them from their sources with `fetch_models.sh`. You can also run it directly; `./fetch_models.sh --force` downloads everything again.
 
 | File | Triangles | Source |
 | --- | --- | --- |

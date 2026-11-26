@@ -39,6 +39,19 @@ add_library(RaytracerCore STATIC
 # Absolute path to the models, so the programs can be run from any directory
 target_compile_definitions(RaytracerCore PRIVATE RAYTRACER_ASSET_DIR="${CMAKE_SOURCE_DIR}/objs")
 
+# Download the models (objs/) during the build if any are missing.
+# Turn off with -DRAYTRACER_FETCH_MODELS=OFF to build offline.
+option(RAYTRACER_FETCH_MODELS "Download missing models with fetch_models.sh during the build" ON)
+if(RAYTRACER_FETCH_MODELS)
+    # Runs on every build. The script only downloads models that are missing,
+    # so when everything is present it just checks and prints one line.
+    add_custom_target(fetch_models ALL
+        COMMAND ${CMAKE_SOURCE_DIR}/fetch_models.sh
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        VERBATIM
+    )
+endif()
+
 # Interactive app
 add_executable(Raytracer src/main.cpp)
 
@@ -51,3 +64,9 @@ target_link_libraries(Raytracer RaytracerCore OpenGL::GL glfw ${GLEW_LIBRARIES})
 # Headless benchmark
 add_executable(Benchmark bench/benchmark.cpp)
 target_link_libraries(Benchmark RaytracerCore)
+
+# Make sure the models are there before the programs that load them are built
+if(RAYTRACER_FETCH_MODELS)
+    add_dependencies(Raytracer fetch_models)
+    add_dependencies(Benchmark fetch_models)
+endif()

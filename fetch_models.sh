@@ -34,9 +34,19 @@ mkdir -p "$OUT"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+MODELS=(dragon.obj buddha.obj teapot.obj torus.obj)
+
 needs() {  # needs <file>: true if the file should be (re)created
     [[ $FORCE -eq 1 || ! -s "$OUT/$1" ]]
 }
+
+# Nothing to do if every model is already present
+missing=0
+for model in "${MODELS[@]}"; do needs "$model" && missing=1; done
+if [[ $missing -eq 0 ]]; then
+    echo "Models: all present in objs/ (use --force to re-download)"
+    exit 0
+fi
 
 # Converts an ASCII PLY (x y z vertices, polygon faces) to OBJ on stdout.
 ply_to_obj() {
