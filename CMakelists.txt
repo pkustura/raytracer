@@ -34,6 +34,7 @@ add_library(RaytracerCore STATIC
     src/mesh.cpp
     src/renderer.cpp
     src/scene.cpp
+    src/benchmark.cpp
 )
 
 # Absolute path to the models, so the programs can be run from any directory
@@ -52,14 +53,34 @@ if(RAYTRACER_FETCH_MODELS)
     )
 endif()
 
+# Dear ImGui for the in-app UI (fetched at configure time, pinned to a release)
+include(FetchContent)
+FetchContent_Declare(imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG v1.92.9b
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(imgui)
+
+add_library(imgui STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl2.cpp
+)
+target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
+
 # Interactive app
-add_executable(Raytracer src/main.cpp)
+add_executable(Raytracer src/main.cpp src/app_ui.cpp)
 
 # Define GL_SILENCE_DEPRECATION to silence OpenGL deprecation warnings on macOS
 target_compile_definitions(Raytracer PRIVATE GL_SILENCE_DEPRECATION)
 
 # Link libraries
-target_link_libraries(Raytracer RaytracerCore OpenGL::GL glfw ${GLEW_LIBRARIES})
+target_link_libraries(Raytracer RaytracerCore imgui OpenGL::GL glfw ${GLEW_LIBRARIES})
 
 # Headless benchmark
 add_executable(Benchmark bench/benchmark.cpp)

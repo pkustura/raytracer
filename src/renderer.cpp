@@ -62,11 +62,10 @@ float fresnel_schlick(float cosi, float etai, float etat) {
     return r0 + (1.0f - r0) * pow(1.0f - cosi, 5.0f);
 }
 
-const int MAX_DEPTH = 5;
 const float RAY_EPSILON = 1e-3f;
 
 // Function to calculate the color of a ray by checking for intersections with shapes
-Color ray_color(const Ray& ray, const vector<Shape*>& shapes, const Light& light, int depth) {
+Color ray_color(const Ray& ray, const vector<Shape*>& shapes, const Light& light, int depth, int max_depth) {
     ++rays_traced;
     float t_min = RAY_EPSILON;
     float t = numeric_limits<float>::max();
@@ -105,7 +104,7 @@ Color ray_color(const Ray& ray, const vector<Shape*>& shapes, const Light& light
     // Local (direct) lighting
     Color local = shade(material, facing_normal, view_dir, light_dir, light.intensity);
 
-    if (depth >= MAX_DEPTH) {
+    if (depth >= max_depth) {
         return local.clamped();
     }
 
@@ -129,12 +128,12 @@ Color ray_color(const Ray& ray, const vector<Shape*>& shapes, const Light& light
             }
             kr = fresnel_schlick(cos_fresnel, etai, etat);
             Ray refract_ray(hit_point - facing_normal * RAY_EPSILON, refract_dir.normalized());
-            refracted = ray_color(refract_ray, shapes, light, depth + 1);
+            refracted = ray_color(refract_ray, shapes, light, depth + 1, max_depth);
         } else {
             kr = 1.0f; // total internal reflection
         }
 
-        Color reflected = ray_color(reflect_ray, shapes, light, depth + 1);
+        Color reflected = ray_color(reflect_ray, shapes, light, depth + 1, max_depth);
         Color transmitted = reflected * kr + refracted * (1.0f - kr);
 
         return (local * (1.0f - material.transparency) + transmitted * material.transparency).clamped();
@@ -143,7 +142,7 @@ Color ray_color(const Ray& ray, const vector<Shape*>& shapes, const Light& light
     // Mirror: add tinted reflection on top of local lighting
     const Color& mr = material.mirror_reflectance;
     if (mr.r > 0.0f || mr.g > 0.0f || mr.b > 0.0f) {
-        Color reflected = ray_color(reflect_ray, shapes, light, depth + 1);
+        Color reflected = ray_color(reflect_ray, shapes, light, depth + 1, max_depth);
         return (local + reflected * mr).clamped();
     }
 
@@ -151,7 +150,7 @@ Color ray_color(const Ray& ray, const vector<Shape*>& shapes, const Light& light
 }
 
 uint64_t render_frame(const Camera& camera, const vector<Shape*>& shapes, const Light& light,
-                      int width, int height, vector<Color>& image, int threads) {
+                      int width, int height, vector<Color>& image, int threads, int max_depth) {
     image.resize(static_cast<size_t>(width) * height);
     if (threads <= 0) threads = max(1u, thread::hardware_concurrency());
 
@@ -171,7 +170,7 @@ uint64_t render_frame(const Camera& camera, const vector<Shape*>& shapes, const 
                 for (int i = 0; i < width; ++i) {
                     float u = float(i) / float(width);
                     float v = float(j) / float(height);
-                    image[j * width + i] = ray_color(camera.get_ray(u, v), shapes, light);
+                    image[j * width + i] = ray_color(camera.get_ray(u, v), shapes, light, 0, max_depth);
                 }
             }
         }
@@ -185,4 +184,16 @@ uint64_t render_frame(const Camera& camera, const vector<Shape*>& shapes, const 
     for (auto& th : pool) th.join();
 
     return total_rays;
+}
+
+// ------------------------------------------------------------- CpuRenderer
+
+int resolve_threads(int threads) {
+    return threads > 0 ? threads : static_cast<int>(max(1u, thread::hardware_concurrency()));
+}
+
+uint64_t CpuRenderer::render(const Camera& camera, const Scene& scene, const RenderSettings& settings,
+                             int width, int height, vector<Color>& image) {
+    return render_frame(camera, scene.shapes, scene.light, width, height, image,
+                        resolve_threads(settings.threads), settings.max_depth);
 }

@@ -4,7 +4,7 @@ A small real-time, multithreaded CPU raytracer in C++ that draws to a GLFW windo
 
 ## Building
 
-Requires CMake, GLFW and GLEW (e.g. `brew install cmake glfw glew`), plus `curl`, `tar` and `awk` to download the models.
+Requires CMake, GLFW and GLEW (e.g. `brew install cmake glfw glew`), plus `curl`, `tar` and `awk` to download the models. [Dear ImGui](https://github.com/ocornut/imgui), used for the settings panel, is downloaded automatically by CMake the first time you configure.
 
 ```sh
 cmake -S . -B build
@@ -22,9 +22,25 @@ The default scene is built in `build_default_scene` (`src/scene.cpp`): the Buddh
 
 ### Controls
 
-- **WASD**: move
+- **WASD**: move (4 units per second, independent of frame rate)
+- **Shift**: move 3× faster
 - **Mouse**: look around
+- **Tab**: open or close the settings panel. While it's open the cursor is free and mouse look is paused.
 - **Esc**: quit
+
+### Settings panel
+
+- **Stats**: FPS, render time, ray throughput, render resolution, triangle count and scene build time.
+- **Graphics**:
+  - **Renderer**: rendering backend (currently CPU only)
+  - **Threads**: automatic, or a fixed count
+  - **Max bounces**: reflection and refraction depth
+  - **Resolution**: render scale, 25–100% of the window
+  - **BVH**: SAH or median split (rebuilds the scene)
+  - **Reset camera**
+- **Benchmark**: runs the same camera orbit as `build/Benchmark` with the current settings and shows the results in a table.
+
+Rendering backends implement the `Renderer` interface (`src/renderer.h`). The CPU renderer is always available, so it's the fallback for future GPU backends.
 
 ## Materials
 
@@ -74,11 +90,14 @@ Credits:
 ./build/Benchmark --frames 120 --width 1280 --height 720 --out frame.ppm
 ```
 
+The same benchmark is available inside the app, from the settings panel. Both use `BenchmarkRun` (`src/benchmark.h`).
+
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--frames N` | 60 | frames in one full camera orbit |
 | `--width W`, `--height H` | 800, 600 | resolution |
 | `--threads T` | 0 | worker threads (0 = one per hardware thread) |
+| `--depth D` | 5 | max reflection/refraction bounces |
 | `--bvh sah\|median` | `sah` | BVH build strategy |
 | `--out file.ppm` | none | save the first frame |
 

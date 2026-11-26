@@ -1,78 +1,132 @@
-#include <fstream>
+#include <algorithm>
+#include <chrono>
 #include <iostream>
+#include <memory>
 #include <vector>
-#include <limits>
 #include <GL/glew.h>  // Include GLEW before GLFW
 #include <GLFW/glfw3.h>
-#include "vector.h"
-#include "ray.h"
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl2.h"
+#include "app_ui.h"
+#include "benchmark.h"
 #include "camera.h"
-#include "light.h"
-#include "color.h"
-#include "material.h"
-#include "shape.h"
 #include "mesh.h"
 #include "renderer.h"
 #include "scene.h"
 
 using namespace std;
+using Clock = chrono::steady_clock;
 
+namespace {
 
-// Utility function to write the image to a PPM file
-void write_image(const string& filename, const vector<Color>& image, int width, int height) {
-    ofstream file(filename);
-    file << "P3\n" << width << " " << height << "\n255\n";
-    for (const auto& color : image) {
-        int ir = static_cast<int>(255.99 * color.r);
-        int ig = static_cast<int>(255.99 * color.g);
-        int ib = static_cast<int>(255.99 * color.b);
-        file << ir << " " << ig << " " << ib << "\n";
-    }
-    file.close();
-}
+const float MOVE_SPEED = 4.0f;        // world units per second
+const float FAST_MULTIPLIER = 3.0f;   // while Shift is held
+const float MAX_STEP_SECONDS = 0.1f;  // cap per-frame movement after a hitch
 
-void processInput(GLFWwindow* window, Camera* camera) {
-    static const float cameraSpeed = 0.5f; // Adjust accordingly
+// Moves the camera with WASD. Movement is scaled by the frame time `dt`
+// (seconds), so speed doesn't depend on the frame rate.
+void processInput(GLFWwindow* window, Camera* camera, float dt) {
+    auto down = [&](int key) { return glfwGetKey(window, key) == GLFW_PRESS; };
 
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        camera->updatePosition(camera->origin - camera->w * cameraSpeed); // move forward
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        camera->updatePosition(camera->origin + camera->w * cameraSpeed); // move backward
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        camera->updatePosition(camera->origin - camera->u * cameraSpeed); // move left
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        camera->updatePosition(camera->origin + camera->u * cameraSpeed); // move right
-    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-        glfwSetWindowShouldClose(window, true);
+    Vector3 move(0, 0, 0);
+    if (down(GLFW_KEY_W)) move -= camera->w;  // forward (w points backward)
+    if (down(GLFW_KEY_S)) move += camera->w;
+    if (down(GLFW_KEY_A)) move -= camera->u;
+    if (down(GLFW_KEY_D)) move += camera->u;
+    if (move.length() == 0.0f) return;
 
+    float speed = MOVE_SPEED;
+    if (down(GLFW_KEY_LEFT_SHIFT) || down(GLFW_KEY_RIGHT_SHIFT)) speed *= FAST_MULTIPLIER;
+
+    // Normalize so diagonal movement isn't faster than straight movement
+    float step = speed * std::min(dt, MAX_STEP_SECONDS);
+    camera->updatePosition(camera->origin + move.normalized() * step);
 }
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
     static const float sensitivity = 0.1f;  // Mouse sensitivity
-    static float lastX = 400, lastY = 300;  // Initial mouse position
-    static bool firstMouse = true;
+    static float lastX = 400, lastY = 300;
 
-    if (firstMouse) {
+    AppState* app = static_cast<AppState*>(glfwGetWindowUserPointer(window));
+    if (!app) return;
+
+    // Mouse look only while the cursor is captured (settings closed, no benchmark)
+    if (app->ui_visible || app->benchmarking()) {
+        app->reset_mouse = true;
+        return;
+    }
+    if (app->reset_mouse) {
         lastX = xpos;
         lastY = ypos;
-        firstMouse = false;
+        app->reset_mouse = false;
+        return;
     }
 
-    float xoffset = xpos - lastX;
-    float yoffset = lastY - ypos;  // Reversed since y-coordinates go from bottom to top
-
+    float xoffset = (xpos - lastX) * sensitivity;
+    float yoffset = (lastY - ypos) * sensitivity;  // Reversed since y-coordinates go from bottom to top
     lastX = xpos;
     lastY = ypos;
 
-    xoffset *= sensitivity;
-    yoffset *= sensitivity;
+    app->camera->updateOrientation(xoffset, yoffset);
+}
 
-    // Retrieve the camera from the user pointer
-    Camera* camera = static_cast<Camera*>(glfwGetWindowUserPointer(window));
-    if (camera) {
-        camera->updateOrientation(xoffset, yoffset);
+Camera make_camera(const Scene& scene, int width, int height) {
+    return Camera(scene.camera_from, scene.camera_at, Vector3(0, 1, 0), scene.vfov,
+                  float(width) / float(height), 0.1f);
+}
+
+void load_scene(AppState& app) {
+    auto t0 = Clock::now();
+    auto scene = make_unique<Scene>();
+    app.scene_ok = build_default_scene(*scene, app.bvh);
+    app.scene_load_seconds = chrono::duration<double>(Clock::now() - t0).count();
+
+    app.triangle_count = 0;
+    for (Shape* shape : scene->shapes) {
+        if (auto* mesh = dynamic_cast<Mesh*>(shape)) app.triangle_count += mesh->triangle_count();
+    }
+    app.scene = std::move(scene);
+}
+
+void set_cursor_captured(GLFWwindow* window, AppState& app, bool captured) {
+    glfwSetInputMode(window, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    app.reset_mouse = true;
+}
+
+// Uploads the rendered image to `texture`, resizing the texture if needed.
+void upload_image(GLuint texture, const vector<Color>& image, int width, int height,
+                  int& tex_width, int& tex_height, vector<unsigned char>& pixels) {
+    pixels.resize(size_t(width) * height * 3);
+    for (size_t i = 0; i < image.size(); ++i) {
+        pixels[i * 3 + 0] = static_cast<unsigned char>(255.99f * image[i].r);
+        pixels[i * 3 + 1] = static_cast<unsigned char>(255.99f * image[i].g);
+        pixels[i * 3 + 2] = static_cast<unsigned char>(255.99f * image[i].b);
+    }
+
+    glBindTexture(GL_TEXTURE_2D, texture);
+    if (width != tex_width || height != tex_height) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+        tex_width = width;
+        tex_height = height;
+    } else {
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
     }
 }
+
+void draw_fullscreen_texture(GLuint texture) {
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0f, 0.0f); glVertex2f(-1.0f, -1.0f);
+    glTexCoord2f(1.0f, 0.0f); glVertex2f( 1.0f, -1.0f);
+    glTexCoord2f(1.0f, 1.0f); glVertex2f( 1.0f,  1.0f);
+    glTexCoord2f(0.0f, 1.0f); glVertex2f(-1.0f,  1.0f);
+    glEnd();
+    glDisable(GL_TEXTURE_2D);
+}
+
+}  // namespace
 
 int main() {
     // Initialize GLFW
@@ -81,16 +135,18 @@ int main() {
         return -1;
     }
 
-    // Create a windowed mode window and its OpenGL context
-    GLFWwindow* window = glfwCreateWindow(800, 600, "Raytracer", NULL, NULL);
+    AppState app;
+
+    // Fixed-size window: the render resolution and camera aspect follow it
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    GLFWwindow* window = glfwCreateWindow(app.window_width, app.window_height, "Raytracer", NULL, NULL);
     if (!window) {
         cerr << "Failed to create GLFW window" << endl;
         glfwTerminate();
         return -1;
     }
-
-    // Make the window's context current
     glfwMakeContextCurrent(window);
+    glfwSwapInterval(0);  // don't cap the frame rate; we want to see real render speed
 
     // Initialize GLEW
     if (glewInit() != GLEW_OK) {
@@ -98,81 +154,139 @@ int main() {
         return -1;
     }
 
-    // Image dimensions
-    const int image_width = 800;
-    const int image_height = 600;
+    // Scene, camera and renderers
+    load_scene(app);
+    app.camera = make_unique<Camera>(make_camera(*app.scene, app.window_width, app.window_height));
+    app.renderers.push_back(make_unique<CpuRenderer>());
 
-    // Scene setup (models are loaded from the repo's objs/ directory)
-    Scene scene;
-    build_default_scene(scene);
-
-    // Camera setup
-    Vector3 vup(0, 1, 0);
-    float aspect_ratio = float(image_width) / float(image_height);
-
-    Camera camera(scene.camera_from, scene.camera_at, vup, scene.vfov, aspect_ratio, 0.1f);
-
-    // Set the user pointer to the camera
-    glfwSetWindowUserPointer(window, &camera);
-
-    // Set the mouse callback
+    // Input: our mouse callback first, so ImGui's backend chains to it
+    glfwSetWindowUserPointer(window, &app);
     glfwSetCursorPosCallback(window, mouse_callback);
+    set_cursor_captured(window, app, true);
 
-    // Capture the mouse cursor
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    // Dear ImGui
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui::GetIO().IniFilename = nullptr;  // don't write imgui.ini next to the binary
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL2_Init();
 
-    // Render loop
-    vector<Color> image(image_width * image_height);
+    // Display texture
     GLuint texture;
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image_width, image_height, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);  // rows of RGB bytes aren't always 4-byte aligned
+    int tex_width = 0, tex_height = 0;
+
+    vector<Color> image;
+    vector<unsigned char> pixels;
+    bool tab_was_down = false;
+    auto last_frame = Clock::now();
 
     while (!glfwWindowShouldClose(window)) {
-        processInput(window, &camera);
-        
+        glfwPollEvents();
+        ImGuiIO& io = ImGui::GetIO();
 
-        render_frame(camera, scene.shapes, scene.light, image_width, image_height, image);
+        // Time since the previous frame, used for movement and the FPS counter
+        auto now = Clock::now();
+        double frame_s = chrono::duration<double>(now - last_frame).count();
+        last_frame = now;
 
-        // Convert image to pixel data
-        vector<unsigned char> pixel_data(image_width * image_height * 3);
-        for (int i = 0; i < image.size(); ++i) {
-            pixel_data[i * 3 + 0] = static_cast<unsigned char>(255.99 * image[i].r);
-            pixel_data[i * 3 + 1] = static_cast<unsigned char>(255.99 * image[i].g);
-            pixel_data[i * 3 + 2] = static_cast<unsigned char>(255.99 * image[i].b);
+        // Keyboard: Esc quits, Tab toggles the settings panel
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, true);
+        bool tab_down = glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS;
+        if (tab_down && !tab_was_down && !io.WantTextInput) {
+            app.ui_visible = !app.ui_visible;
+            set_cursor_captured(window, app, !app.ui_visible);
+        }
+        tab_was_down = tab_down;
+
+        // Handle requests from the UI
+        if (app.request_scene_rebuild) {
+            app.request_scene_rebuild = false;
+            load_scene(app);
+        }
+        if (app.request_camera_reset) {
+            app.request_camera_reset = false;
+            *app.camera = make_camera(*app.scene, app.window_width, app.window_height);
         }
 
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, image_width, image_height, GL_RGB, GL_UNSIGNED_BYTE, pixel_data.data());
+        int width = max(1, int(app.window_width * app.settings.resolution_scale));
+        int height = max(1, int(app.window_height * app.settings.resolution_scale));
 
-        // Clear the screen
+        if (app.request_bench_start) {
+            app.request_bench_start = false;
+            app.bench = make_unique<BenchmarkRun>(*app.scene, app.bench_frames, width, height,
+                                                  resolve_threads(app.settings.threads), app.settings.max_depth);
+        }
+        if (app.request_bench_cancel) {
+            app.request_bench_cancel = false;
+            app.bench.reset();
+        }
+
+        // Pick the camera: the benchmark orbit, or the user's camera
+        Camera camera = app.benchmarking() ? app.bench->camera() : *app.camera;
+        if (app.benchmarking()) {
+            width = app.bench->result().width;
+            height = app.bench->result().height;
+        } else if (!io.WantCaptureKeyboard) {
+            processInput(window, app.camera.get(), float(frame_s));
+            camera = *app.camera;
+        }
+
+        // Render
+        auto t0 = Clock::now();
+        uint64_t rays = app.renderer().render(camera, *app.scene, app.settings, width, height, image);
+        double render_s = chrono::duration<double>(Clock::now() - t0).count();
+
+        if (app.benchmarking()) {
+            app.bench->record(render_s, rays);
+            if (app.bench->done()) {
+                app.last_bench = app.bench->result();
+                app.last_bench_renderer = app.renderer().name();
+                app.last_bench_bvh = bvh_name(app.bvh);
+                app.has_bench_result = true;
+                app.bench.reset();
+            }
+        }
+
+        // Smoothed stats
+        const double k = 0.1;
+        app.render_ms += k * (1000.0 * render_s - app.render_ms);
+        app.frame_ms += k * (1000.0 * frame_s - app.frame_ms);
+        app.mrays_per_sec += k * ((render_s > 0 ? rays / render_s / 1e6 : 0.0) - app.mrays_per_sec);
+        app.render_width = width;
+        app.render_height = height;
+
+        // Display the image, then the UI on top
+        upload_image(texture, image, width, height, tex_width, tex_height, pixels);
+
+        int fb_width, fb_height;
+        glfwGetFramebufferSize(window, &fb_width, &fb_height);
+        glViewport(0, 0, fb_width, fb_height);
         glClear(GL_COLOR_BUFFER_BIT);
+        draw_fullscreen_texture(texture);
 
-        // Draw the texture
-        glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, texture);
+        ImGui_ImplOpenGL2_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        draw_ui(app);
+        ImGui::Render();
+        ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
 
-        glBegin(GL_QUADS);
-        glTexCoord2f(0.0f, 0.0f); glVertex2f(-1.0f, -1.0f);
-        glTexCoord2f(1.0f, 0.0f); glVertex2f( 1.0f, -1.0f);
-        glTexCoord2f(1.0f, 1.0f); glVertex2f( 1.0f,  1.0f);
-        glTexCoord2f(0.0f, 1.0f); glVertex2f(-1.0f,  1.0f);
-        glEnd();
-
-        glDisable(GL_TEXTURE_2D);
-
-        // Swap front and back buffers
         glfwSwapBuffers(window);
-
-        // Poll for and process events
-        glfwPollEvents();
     }
+
     // Clean up
+    ImGui_ImplOpenGL2_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
     glDeleteTextures(1, &texture);
     glfwDestroyWindow(window);
     glfwTerminate();
 
     return 0;
 }
-
