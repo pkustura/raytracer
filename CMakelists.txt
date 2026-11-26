@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(Raytracer)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)  # lets editors/clangd find include paths and flags
 
 # Default to an optimized build; the renderer runs on the CPU every frame.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -35,6 +36,7 @@ add_library(RaytracerCore STATIC
     src/renderer.cpp
     src/scene.cpp
     src/benchmark.cpp
+    src/pathtracer.cpp
 )
 
 # Absolute path to the models, so the programs can be run from any directory

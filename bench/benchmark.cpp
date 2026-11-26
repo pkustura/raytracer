@@ -2,7 +2,7 @@
 // models and reports frame rate and ray throughput.
 //
 // Usage: Benchmark [--frames N] [--width W] [--height H] [--threads T] [--depth D]
-//                  [--bvh sah|median] [--out frame.ppm]
+//                  [--bvh sah|median] [--renderer whitted|path] [--spp S] [--out frame.ppm]
 //        --threads 0 (the default) uses one thread per hardware thread.
 //
 // The same benchmark can be run from the interactive app's settings panel.
@@ -15,6 +15,7 @@
 #include <vector>
 #include "benchmark.h"
 #include "camera.h"
+#include "pathtracer.h"
 #include "renderer.h"
 #include "scene.h"
 
@@ -39,6 +40,8 @@ int main(int argc, char** argv) {
     int height = 600;
     int threads = 0;
     int depth = DEFAULT_MAX_DEPTH;
+    bool path = false;
+    int spp = 1;
     BvhBuilder bvh = BvhBuilder::SAH;
     string out;
 
@@ -53,6 +56,13 @@ int main(int argc, char** argv) {
         else if (arg == "--height") height = atoi(next());
         else if (arg == "--threads") threads = atoi(next());
         else if (arg == "--depth") depth = atoi(next());
+        else if (arg == "--spp") spp = atoi(next());
+        else if (arg == "--renderer") {
+            string v = next();
+            if (v == "whitted") path = false;
+            else if (v == "path") path = true;
+            else { cerr << "--renderer must be 'whitted' or 'path'" << endl; return 1; }
+        }
         else if (arg == "--bvh") {
             string v = next();
             if (v == "sah") bvh = BvhBuilder::SAH;
@@ -60,7 +70,7 @@ int main(int argc, char** argv) {
             else { cerr << "--bvh must be 'sah' or 'median'" << endl; return 1; }
         }
         else if (arg == "--out") out = next();
-        else { cerr << "usage: " << argv[0] << " [--frames N] [--width W] [--height H] [--threads T] [--depth D] [--bvh sah|median] [--out frame.ppm]" << endl; return 1; }
+        else { cerr << "usage: " << argv[0] << " [--frames N] [--width W] [--height H] [--threads T] [--depth D] [--bvh sah|median] [--renderer whitted|path] [--spp S] [--out frame.ppm]" << endl; return 1; }
     }
 
     auto t_load = Clock::now();
@@ -68,12 +78,17 @@ int main(int argc, char** argv) {
     if (!build_default_scene(scene, bvh)) return 1;
     double load_s = chrono::duration<double>(Clock::now() - t_load).count();
 
-    CpuRenderer renderer;
+    CpuRenderer whitted;
+    PathTracer path_tracer;
+    Renderer& renderer = path ? static_cast<Renderer&>(path_tracer) : static_cast<Renderer&>(whitted);
     RenderSettings settings;
     settings.threads = threads;
     settings.max_depth = depth;
+    settings.samples_per_frame = spp;
+    settings.max_samples = 0;
 
     BenchmarkRun run(scene, frames, width, height, resolve_threads(threads), depth);
+    if (path) run.set_samples_per_frame(spp);
     vector<Color> image;
     while (!run.done()) {
         Camera camera = run.camera();
@@ -86,6 +101,7 @@ int main(int argc, char** argv) {
 
     const BenchmarkResult& r = run.result();
     printf("Scene load + BVH build: %.3f s\n", load_s);
+    printf("Renderer: %s%s\n", renderer.name(), path ? (", " + to_string(spp) + " spp/frame").c_str() : "");
     printf("Frames: %d at %dx%d, %d threads, %s BVH, depth %d\n", r.frames, r.width, r.height, r.threads,
            bvh == BvhBuilder::SAH ? "SAH" : "median-split", r.max_depth);
     printf("Average: %.2f fps (%.1f ms/frame, min %.1f, max %.1f)\n",

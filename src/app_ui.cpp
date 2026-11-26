@@ -83,6 +83,45 @@ void draw_settings(AppState& app) {
     ImGui::EndDisabled();
 }
 
+void draw_progressive(AppState& app) {
+    Renderer& r = app.renderer();
+    if (!r.progressive()) return;
+    if (!ImGui::CollapsingHeader("Path tracing", ImGuiTreeNodeFlags_DefaultOpen)) return;
+
+    int max_samples = app.settings.max_samples;
+    char label[64];
+    if (max_samples > 0) {
+        snprintf(label, sizeof(label), "%d / %d samples", r.sample_count(), max_samples);
+        ImGui::ProgressBar(float(r.sample_count()) / max_samples, ImVec2(-1, 0), label);
+    } else {
+        ImGui::Text("%d samples", r.sample_count());
+    }
+    ImGui::TextDisabled("Accumulates while the camera is still; moving restarts it.");
+
+    ImGui::BeginDisabled(app.benchmarking());
+    ImGui::SliderInt("Samples/frame", &app.settings.samples_per_frame, 1, 16);
+    ImGui::SetNextItemWidth(120);
+    if (ImGui::InputInt("Max samples", &app.settings.max_samples, 64, 256)) {
+        if (app.settings.max_samples < 0) app.settings.max_samples = 0;
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(0 = no limit)");
+    ImGui::Checkbox("Caustics", &app.settings.caustics);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Light focused by the mirror and glass onto other surfaces.\n"
+                          "Physically correct, but slow to converge: shows up as bright speckles.");
+    }
+    ImGui::BeginDisabled(!app.settings.caustics);
+    ImGui::SliderFloat("Firefly clamp", &app.settings.firefly_clamp, 0.0f, 100.0f, "%.0f");
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        ImGui::SetTooltip("Caps how bright one sample of bounced light can be.\n"
+                          "Lower: fewer speckles but a dimmer caustic. 0 = off (exact, noisy).");
+    }
+    ImGui::EndDisabled();
+    if (ImGui::Button("Restart accumulation")) r.reset();
+    ImGui::EndDisabled();
+}
+
 void draw_benchmark(AppState& app) {
     if (!ImGui::CollapsingHeader("Benchmark", ImGuiTreeNodeFlags_DefaultOpen)) return;
     ImGui::TextWrapped("Orbits the camera once around the scene using the current settings. "
@@ -120,6 +159,7 @@ void draw_benchmark(AppState& app) {
             row("Primary rays", "%.2f Mrays/s", r.primary_mrays_per_sec());
             row("All rays", "%.2f Mrays/s", r.all_mrays_per_sec());
             row("Rays per pixel", "%.2f", r.rays_per_pixel());
+            if (r.samples_per_frame > 0) row("Samples per frame", "%.0f", r.samples_per_frame);
             ImGui::EndTable();
         }
     }
@@ -138,6 +178,7 @@ void draw_ui(AppState& app) {
     if (ImGui::Begin("Settings  (Tab to close)", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         draw_stats(app);
         draw_settings(app);
+        draw_progressive(app);
         draw_benchmark(app);
     }
     ImGui::End();

@@ -9,16 +9,20 @@ struct BenchmarkResult {
     int width = 0, height = 0;
     int threads = 0;
     int max_depth = 0;
+    int samples_per_frame = 0;  // progressive renderers only (0 = not applicable)
     double total_seconds = 0.0;
     double min_frame = 0.0, max_frame = 0.0;
     uint64_t rays = 0;
 
     double fps() const { return total_seconds > 0 ? frames / total_seconds : 0.0; }
     double ms_per_frame() const { return frames > 0 ? 1000.0 * total_seconds / frames : 0.0; }
-    uint64_t primary_rays() const { return uint64_t(width) * height * frames; }
+    uint64_t pixels_rendered() const { return uint64_t(width) * height * frames; }
+    // Camera rays: one per pixel per frame, times the samples per frame for progressive renderers
+    uint64_t primary_rays() const { return pixels_rendered() * uint64_t(samples_per_frame > 0 ? samples_per_frame : 1); }
     double primary_mrays_per_sec() const { return total_seconds > 0 ? primary_rays() / total_seconds / 1e6 : 0.0; }
     double all_mrays_per_sec() const { return total_seconds > 0 ? rays / total_seconds / 1e6 : 0.0; }
-    double rays_per_pixel() const { return primary_rays() > 0 ? double(rays) / primary_rays() : 0.0; }
+    // All rays (camera, bounce and shadow rays) per pixel per frame
+    double rays_per_pixel() const { return pixels_rendered() > 0 ? double(rays) / pixels_rendered() : 0.0; }
 };
 
 // The standard benchmark: one full camera orbit around the scene's look-at
@@ -44,6 +48,10 @@ public:
     void record(double seconds, uint64_t rays);
 
     const BenchmarkResult& result() const { return result_; }
+
+    // Recorded for progressive renderers (the camera moves every frame, so each
+    // frame renders exactly this many samples per pixel).
+    void set_samples_per_frame(int spp) { result_.samples_per_frame = spp; }
 
 private:
     Vector3 target_;

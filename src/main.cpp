@@ -2,6 +2,7 @@
 #include <chrono>
 #include <iostream>
 #include <memory>
+#include <thread>
 #include <vector>
 #include <GL/glew.h>  // Include GLEW before GLFW
 #include <GLFW/glfw3.h>
@@ -12,6 +13,7 @@
 #include "benchmark.h"
 #include "camera.h"
 #include "mesh.h"
+#include "pathtracer.h"
 #include "renderer.h"
 #include "scene.h"
 
@@ -158,6 +160,7 @@ int main() {
     load_scene(app);
     app.camera = make_unique<Camera>(make_camera(*app.scene, app.window_width, app.window_height));
     app.renderers.push_back(make_unique<CpuRenderer>());
+    app.renderers.push_back(make_unique<PathTracer>());
 
     // Input: our mouse callback first, so ImGui's backend chains to it
     glfwSetWindowUserPointer(window, &app);
@@ -208,6 +211,7 @@ int main() {
         if (app.request_scene_rebuild) {
             app.request_scene_rebuild = false;
             load_scene(app);
+            for (auto& r : app.renderers) r->reset();
         }
         if (app.request_camera_reset) {
             app.request_camera_reset = false;
@@ -221,6 +225,8 @@ int main() {
             app.request_bench_start = false;
             app.bench = make_unique<BenchmarkRun>(*app.scene, app.bench_frames, width, height,
                                                   resolve_threads(app.settings.threads), app.settings.max_depth);
+            if (app.renderer().progressive()) app.bench->set_samples_per_frame(app.settings.samples_per_frame);
+            app.renderer().reset();  // start from a clean state, like the headless tool
         }
         if (app.request_bench_cancel) {
             app.request_bench_cancel = false;
@@ -239,7 +245,9 @@ int main() {
 
         // Render
         auto t0 = Clock::now();
-        uint64_t rays = app.renderer().render(camera, *app.scene, app.settings, width, height, image);
+        RenderSettings settings = app.settings;
+        if (app.benchmarking()) settings.max_samples = 0;  // every frame renders samples_per_frame, as headless does
+        uint64_t rays = app.renderer().render(camera, *app.scene, settings, width, height, image);
         double render_s = chrono::duration<double>(Clock::now() - t0).count();
 
         if (app.benchmarking()) {
@@ -261,8 +269,16 @@ int main() {
         app.render_width = width;
         app.render_height = height;
 
+        // A progressive renderer that hit its sample cap adds nothing new: skip
+        // the upload and idle a little instead of spinning a core at 100%
+        bool converged = rays == 0 && app.renderer().progressive() && !app.benchmarking();
+        if (converged && width == tex_width && height == tex_height) {
+            this_thread::sleep_for(chrono::milliseconds(15));
+        } else {
+            upload_image(texture, image, width, height, tex_width, tex_height, pixels);
+        }
+
         // Display the image, then the UI on top
-        upload_image(texture, image, width, height, tex_width, tex_height, pixels);
 
         int fb_width, fb_height;
         glfwGetFramebufferSize(window, &fb_width, &fb_height);
